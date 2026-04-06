@@ -1,0 +1,18 @@
+[package]
+name = "pdfer_forms"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Pure-Rust pypdf/PyPDF2-style AcroForm inspection and form filling compatibility layer"
+keywords = ["pdf", "forms", "acroform", "pypdf", "pypdf2"]
+categories = ["parser-implementations", "text-processing"]
+repository = "https://github.com/clark-labs-inc/pdfer-forms-rs"
+exclude = ["benchmarks/target/", "benchmarks/pdfs/"]
+
+[dependencies]
+lopdf = "0.40"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
