@@ -1,54 +1,42 @@
-# pdfer_forms
+# pdfer_forms — Fast Pure-Rust PDF Form Filling & AcroForm Library
 
-Pure Rust AcroForm inspection and filling with a compatibility surface modeled after the PDF form-manipulation pieces of **pypdf** and **PyPDF2**.
+[![Crates.io](https://img.shields.io/crates/v/pdfer_forms.svg)](https://crates.io/crates/pdfer_forms)
+[![docs.rs](https://img.shields.io/docsrs/pdfer_forms)](https://docs.rs/pdfer_forms)
+[![Crates.io downloads](https://img.shields.io/crates/d/pdfer_forms.svg)](https://crates.io/crates/pdfer_forms)
+[![License](https://img.shields.io/crates/l/pdfer_forms.svg)](https://github.com/clark-labs-inc/pdfer-forms-rs#license)
 
-This crate is deliberately focused on the form APIs people usually reach for when they are porting Python workflows:
+**`pdfer_forms`** is a fast, pure-Rust library for **filling PDF forms**, **inspecting AcroForm fields**, and **flattening fillable PDFs** — with an API modeled on Python's [`pypdf`](https://pypdf.readthedocs.io/) and `PyPDF2`. If you need to read, fill, or flatten fillable PDF forms from Rust, this crate is a drop-in replacement for the form-manipulation pieces of those Python libraries.
 
-- `get_fields`
-- `get_form_text_fields`
-- `get_pages_showing_field`
-- `add_form_topname`
-- `rename_form_topname`
-- `set_need_appearances_writer`
-- `update_page_form_field_values`
-- `reattach_fields`
-- `remove_annotations`
-- PyPDF2-style camelCase aliases such as `updatePageFormFieldValues`
+Built and maintained by **[Clark Labs Inc.](https://github.com/clark-labs-inc)**
 
-Under the hood it uses `lopdf`, which is itself a pure-Rust PDF library.
+- **Pure Rust**, no Python, no C dependencies (built on [`lopdf`](https://crates.io/crates/lopdf))
+- **Fast** — up to **23× faster than pypdf** on real-world government forms (see benchmarks below)
+- **PyPDF / PyPDF2 compatibility layer** — familiar `get_fields`, `update_page_form_field_values`, `updatePageFormFieldValues`, etc.
+- **AcroForm inspection, form filling, and flattening** in one crate
+- `#![forbid(unsafe_code)]`
 
-## Status
+## Why pdfer_forms?
 
-The crate is intended as a **native Rust port of the form-manipulation surface**, not as a line-for-line port of the full Python libraries.
+If you are porting a Python PDF workflow to Rust, or building a Rust service that needs to fill fillable PDFs (government forms, tax forms, application forms, contracts), the pure-Rust PDF ecosystem has historically been thin on AcroForm support. `pdfer_forms` closes that gap:
 
-Implemented here:
+- Inspect every AcroForm field, including qualified and partial names
+- Fill text, checkbox, radio, and choice (listbox / combo) fields
+- Regenerate widget appearance streams so filled values render in every viewer
+- Flatten forms (draw appearances into page content) for archival or print
+- Strip widget annotations for final delivery
+- Reattach orphan widgets to `/AcroForm /Fields`
+- Toggle `/NeedAppearances`, group fields under a top-level name, and more
 
-- AcroForm tree inspection
-- qualified and partial field names
-- text field value extraction
-- page lookup for repeated widgets
-- top-level form grouping / renaming
-- `/NeedAppearances` control
-- page-scoped field filling
-- text/choice appearance regeneration
-- button state updates for checkboxes / radios
-- orphan widget reattachment to `/AcroForm /Fields`
-- annotation removal for post-flatten cleanup
-- optional flatten step that draws widget appearance streams into page content
-- `FieldInput::KeepCurrent` for flattening without changing the stored value
+## Install
 
-Known caveats:
+```toml
+[dependencies]
+pdfer_forms = "0.1"
+```
 
+Requires Rust **1.85+** (set by the pinned `lopdf = 0.40` dependency).
 
-- Generated text appearances use built-in Type1 fonts and a simple WinAnsi text stream. The stored field value uses UTF-16BE, but generated appearance content itself is safest for ASCII / WinAnsi text.
-- Signature-field appearance generation is not implemented.
-- The API shape is intentionally close to pypdf / PyPDF2, but it remains idiomatic Rust rather than trying to mimic Python objects exactly.
-
-## Rust version
-
-This crate is configured for `lopdf = 0.40`, which currently expects Rust `1.85+`.
-
-## Quick start
+## Quick start — fill a PDF form in Rust
 
 ```rust,no_run
 use pdfer_forms::{FieldInput, PageSelection, PdfReaderCompat, PdfWriterCompat};
@@ -81,7 +69,45 @@ fn main() -> pdfer_forms::Result<()> {
 }
 ```
 
-## API notes
+## Features
+
+- AcroForm tree inspection
+- Qualified and partial field names
+- Text field value extraction
+- Page lookup for repeated widgets
+- Top-level form grouping / renaming
+- `/NeedAppearances` control
+- Page-scoped field filling
+- Text and choice appearance regeneration
+- Button state updates for checkboxes and radio groups
+- Orphan widget reattachment to `/AcroForm /Fields`
+- Annotation removal for post-flatten cleanup
+- Optional flatten step that draws widget appearance streams into page content
+- `FieldInput::KeepCurrent` for flattening without changing the stored value
+
+### Known caveats
+
+- Generated text appearances use built-in Type1 fonts and a simple WinAnsi text stream. The stored field value uses UTF-16BE, but generated appearance content itself is safest for ASCII / WinAnsi text.
+- Signature-field appearance generation is not implemented.
+- The API is intentionally close to pypdf / PyPDF2, but remains idiomatic Rust rather than mimicking Python objects exactly.
+
+## PyPDF / PyPDF2 API compatibility
+
+`pdfer_forms` mirrors the form-manipulation surface of `pypdf` and `PyPDF2`, including camelCase aliases:
+
+| pypdf / PyPDF2 | pdfer_forms |
+|---|---|
+| `PdfReader.get_fields()` | `PdfReaderCompat::get_fields` |
+| `PdfReader.get_form_text_fields()` | `PdfReaderCompat::get_form_text_fields` |
+| `PdfReader.get_pages_showing_field()` | `PdfReaderCompat::get_pages_showing_field` |
+| `PdfWriter.add_form_topname()` | `PdfReaderCompat::add_form_topname` |
+| `PdfWriter.rename_form_topname()` | `PdfReaderCompat::rename_form_topname` |
+| `PdfWriter.set_need_appearances_writer()` | `PdfWriterCompat::set_need_appearances_writer` |
+| `PdfWriter.update_page_form_field_values()` | `PdfWriterCompat::update_page_form_field_values` |
+| `PdfWriter.reattach_fields()` | `PdfWriterCompat::reattach_fields` |
+| `PdfWriter.remove_annotations()` | `PdfWriterCompat::remove_annotations` |
+| `updatePageFormFieldValues` (PyPDF2) | `updatePageFormFieldValues` |
+| `setNeedAppearancesWriter` (PyPDF2) | `setNeedAppearancesWriter` |
 
 ### Reader-like surface
 
@@ -122,7 +148,7 @@ writer.remove_annotations(Some(&["/Widget"]))?;
 writer.save("flattened.pdf")?;
 ```
 
-### PyPDF2 compatibility shims
+### PyPDF2 camelCase shims
 
 ```rust,ignore
 use pdfer_forms::{PageSelection, PdfWriterCompat};
@@ -138,20 +164,18 @@ writer.updatePageFormFieldValues(PageSelection::Index(0), &fields, 0)?;
 
 ## Main types
 
-- `PdfReaderCompat`
-- `PdfWriterCompat`
-- `FormField`
-- `FieldValue`
-- `FieldInput`
-- `PageSelection`
-- `PageHandle`
-- `FieldSpecifier`
+- `PdfReaderCompat` — pypdf-style reader wrapper
+- `PdfWriterCompat` — pypdf-style writer wrapper
+- `FormField` — an AcroForm field with value, type, and widgets
+- `FieldValue` — decoded field value (text, button state, choice list)
+- `FieldInput` — input variant for field updates (text, button, choice, `KeepCurrent`)
+- `PageSelection` — `All` or `Index(n)` scope for updates
+- `PageHandle` — page identity helper
+- `FieldSpecifier` — qualified / partial field name resolver
 
 ## Benchmarks — pdfer_forms vs pypdf / PyPDF2
 
-Benchmarked against **pypdf 6.9.2** and **PyPDF2 3.0.1** on 9 real-world government
-PDF forms (IRS, USCIS, GSA, Hong Kong IRD, Guatemala SAT) in English, Spanish,
-and Chinese.
+Benchmarked against **pypdf 6.9.2** and **PyPDF2 3.0.1** on 9 real-world government PDF forms (IRS, USCIS, GSA, Hong Kong IRD, Guatemala SAT) in English, Spanish, and Chinese.
 
 ### Accuracy
 
@@ -161,29 +185,44 @@ and Chinese.
 | Field type match rate | 1004/1004 (100.0%) |
 | Field value match rate | 1004/1004 (100.0%) |
 
-The 7 name mismatches are encoding differences on a single Spanish-language PDF
-where pypdf decodes non-ASCII field names (e.g. `DÍA`) while pdfer_forms
-currently returns the raw bytes.
+The 7 name mismatches are encoding differences on a single Spanish-language PDF where pypdf decodes non-ASCII field names (e.g. `DÍA`) while pdfer_forms currently returns the raw bytes.
 
 ### Performance (average across 9 PDFs)
 
 | Operation | pypdf | pdfer_forms | Speedup |
 |---|---|---|---|
-| `get_fields` | 12.1 ms | 0.51 ms | **23.6x faster** |
-| `get_pages_showing_field` | 2.2 ms | 0.47 ms | **4.8x faster** |
-| `fill_form` | 40.3 ms | 11.0 ms | **3.7x faster** |
-| `remove_annotations` | 26.4 ms | 6.8 ms | **3.9x faster** |
-| `get_form_text_fields` | 1.2 ms | 0.49 ms | **2.4x faster** |
-| `load` | 1.9 ms | 5.2 ms | 2.7x slower\* |
+| `get_fields` | 12.1 ms | 0.51 ms | **23.6× faster** |
+| `get_pages_showing_field` | 2.2 ms | 0.47 ms | **4.8× faster** |
+| `fill_form` | 40.3 ms | 11.0 ms | **3.7× faster** |
+| `remove_annotations` | 26.4 ms | 6.8 ms | **3.9× faster** |
+| `get_form_text_fields` | 1.2 ms | 0.49 ms | **2.4× faster** |
+| `load` | 1.9 ms | 5.2 ms | 2.7× slower\* |
 
-\*Load is slower because `lopdf` eagerly parses the full cross-reference table;
-pypdf uses lazy loading. For most workflows the total round-trip is still faster.
+\*Load is slower because `lopdf` eagerly parses the full cross-reference table; pypdf uses lazy loading. For most workflows the total round-trip is still faster.
 
-### API Parity
+### API parity
 
-All 6 core pypdf form APIs pass on every test PDF. PyPDF2-style camelCase
-aliases (`getFields`, `updatePageFormFieldValues`, etc.) are included.
+All 6 core pypdf form APIs pass on every test PDF. PyPDF2-style camelCase aliases (`getFields`, `updatePageFormFieldValues`, etc.) are included.
+
+## Related crates
+
+- [`lopdf`](https://crates.io/crates/lopdf) — the pure-Rust PDF library this crate is built on
+- [`printpdf`](https://crates.io/crates/printpdf) — for generating PDFs from scratch
+- [`pdf`](https://crates.io/crates/pdf) — another pure-Rust PDF reader
+
+## Contributing
+
+Issues and pull requests are welcome at <https://github.com/clark-labs-inc/pdfer-forms-rs>.
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of
+
+- Apache License, Version 2.0 (<https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license (<https://opensource.org/licenses/MIT>)
+
+at your option.
+
+---
+
+© Clark Labs Inc. `pdfer_forms` is not affiliated with the authors of pypdf or PyPDF2. pypdf and PyPDF2 are trademarks of their respective owners; compatibility is provided for porting convenience.

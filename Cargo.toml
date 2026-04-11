@@ -1,13 +1,17 @@
 [package]
 name = "pdfer_forms"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
+authors = ["Clark Labs Inc."]
 license = "MIT OR Apache-2.0"
-description = "Pure-Rust pypdf/PyPDF2-style AcroForm inspection and form filling compatibility layer"
-keywords = ["pdf", "forms", "acroform", "pypdf", "pypdf2"]
+description = "Fast pure-Rust PDF form filling and AcroForm inspection — a pypdf / PyPDF2 compatibility layer for reading, filling, and flattening fillable PDFs."
+keywords = ["pdf", "acroform", "forms", "pypdf", "pypdf2"]
 categories = ["parser-implementations", "text-processing"]
 repository = "https://github.com/clark-labs-inc/pdfer-forms-rs"
+homepage = "https://github.com/clark-labs-inc/pdfer-forms-rs"
+documentation = "https://docs.rs/pdfer_forms"
+readme = "README.md"
 exclude = ["benchmarks/target/", "benchmarks/pdfs/"]
 
 [dependencies]
