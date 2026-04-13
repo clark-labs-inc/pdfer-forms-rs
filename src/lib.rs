@@ -9,11 +9,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
+pub mod ops;
+
 pub type Result<T> = std::result::Result<T, PdferError>;
 
 #[derive(Debug)]
 pub enum PdferError {
     Lopdf(LopdfError),
+    Io(std::io::Error),
     MissingCatalog,
     MissingAcroForm,
     MissingFields,
@@ -29,6 +32,7 @@ impl fmt::Display for PdferError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Lopdf(err) => write!(f, "lopdf error: {err}"),
+            Self::Io(err) => write!(f, "I/O error: {err}"),
             Self::MissingCatalog => write!(f, "missing PDF catalog"),
             Self::MissingAcroForm => write!(f, "no /AcroForm dictionary in PDF"),
             Self::MissingFields => write!(f, "no /Fields array in /AcroForm dictionary"),
@@ -47,6 +51,12 @@ impl std::error::Error for PdferError {}
 impl From<LopdfError> for PdferError {
     fn from(value: LopdfError) -> Self {
         Self::Lopdf(value)
+    }
+}
+
+impl From<std::io::Error> for PdferError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
     }
 }
 

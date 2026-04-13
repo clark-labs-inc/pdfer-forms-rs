@@ -1,11 +1,11 @@
-# pdfer_forms — Fast Pure-Rust PDF Form Filling & AcroForm Library
+# pdfer_forms — Fast Pure-Rust PDF Forms & Document Operations
 
 [![Crates.io](https://img.shields.io/crates/v/pdfer_forms.svg)](https://crates.io/crates/pdfer_forms)
 [![docs.rs](https://img.shields.io/docsrs/pdfer_forms)](https://docs.rs/pdfer_forms)
 [![Crates.io downloads](https://img.shields.io/crates/d/pdfer_forms.svg)](https://crates.io/crates/pdfer_forms)
 [![License](https://img.shields.io/crates/l/pdfer_forms.svg)](https://github.com/clark-labs-inc/pdfer-forms-rs#license)
 
-**`pdfer_forms`** is a fast, pure-Rust library for **filling PDF forms**, **inspecting AcroForm fields**, and **flattening fillable PDFs** — with an API modeled on Python's [`pypdf`](https://pypdf.readthedocs.io/) and `PyPDF2`. If you need to read, fill, or flatten fillable PDF forms from Rust, this crate is a drop-in replacement for the form-manipulation pieces of those Python libraries.
+**`pdfer_forms`** is a fast, pure-Rust library for **filling PDF forms**, **inspecting AcroForm fields**, **flattening fillable PDFs**, and **document operations** (merge, split, rotate, encrypt/decrypt) — with an API modeled on Python's [`pypdf`](https://pypdf.readthedocs.io/) and `PyPDF2`.
 
 Built and maintained by **[Clark Labs Inc.](https://github.com/clark-labs-inc)**
 
@@ -13,6 +13,7 @@ Built and maintained by **[Clark Labs Inc.](https://github.com/clark-labs-inc)**
 - **Fast** — up to **23× faster than pypdf** on real-world government forms (see benchmarks below)
 - **PyPDF / PyPDF2 compatibility layer** — familiar `get_fields`, `update_page_form_field_values`, `updatePageFormFieldValues`, etc.
 - **AcroForm inspection, form filling, and flattening** in one crate
+- **Document operations** — merge, split, rotate, encrypt, decrypt (replaces `qpdf` CLI)
 - `#![forbid(unsafe_code)]`
 
 ## Why pdfer_forms?
@@ -31,7 +32,7 @@ If you are porting a Python PDF workflow to Rust, or building a Rust service tha
 
 ```toml
 [dependencies]
-pdfer_forms = "0.1"
+pdfer_forms = "0.2"
 ```
 
 Requires Rust **1.85+** (set by the pinned `lopdf = 0.40` dependency).
@@ -68,6 +69,60 @@ fn main() -> pdfer_forms::Result<()> {
     Ok(())
 }
 ```
+
+## Document operations — merge, split, rotate, encrypt
+
+New in **0.2.0**: the `ops` module provides pure-Rust replacements for `qpdf` / `pdftk` CLI operations.
+
+```rust,no_run
+use pdfer_forms::ops;
+
+fn main() -> pdfer_forms::Result<()> {
+    // Merge multiple PDFs
+    let mut merged = ops::merge_files(&["doc1.pdf", "doc2.pdf", "doc3.pdf"])?;
+    merged.save("merged.pdf")?;
+
+    // Split: extract pages 1 and 3
+    let doc = lopdf::Document::load("input.pdf")?;
+    let mut subset = ops::split_pages(&doc, &[1, 3])?;
+    subset.save("pages_1_3.pdf")?;
+
+    // Split into one PDF per page
+    let mut pages = ops::split_each_page(&doc)?;
+    for (i, page_doc) in pages.iter_mut().enumerate() {
+        page_doc.save(format!("page_{}.pdf", i + 1))?;
+    }
+
+    // Rotate pages 90° clockwise
+    let mut doc = lopdf::Document::load("input.pdf")?;
+    ops::rotate_pages(&mut doc, &[1, 2], 90)?;
+    doc.save("rotated.pdf")?;
+
+    // Encrypt with passwords
+    let mut doc = lopdf::Document::load("input.pdf")?;
+    ops::encrypt_document(&mut doc, "user_pass", "owner_pass")?;
+    doc.save("encrypted.pdf")?;
+
+    // Decrypt
+    let mut doc = lopdf::Document::load("encrypted.pdf")?;
+    ops::decrypt_document(&mut doc, "user_pass")?;
+    doc.save("decrypted.pdf")?;
+
+    Ok(())
+}
+```
+
+### Available functions
+
+| Function | Description |
+|---|---|
+| `ops::merge_documents(docs)` | Merge multiple `lopdf::Document`s into one |
+| `ops::merge_files(paths)` | Load and merge PDFs from file paths |
+| `ops::split_pages(doc, pages)` | Extract specific pages (1-based) into a new document |
+| `ops::split_each_page(doc)` | Split into one document per page |
+| `ops::rotate_pages(doc, pages, degrees)` | Rotate pages by 0/90/180/270 degrees |
+| `ops::encrypt_document(doc, user_pw, owner_pw)` | Encrypt with AES-128 |
+| `ops::decrypt_document(doc, password)` | Decrypt with password |
 
 ## Features
 
