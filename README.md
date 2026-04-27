@@ -280,4 +280,6 @@ at your option.
 
 ---
 
-© Clark Labs Inc. `pdfer_forms` is not affiliated with the authors of pypdf or PyPDF2. pypdf and PyPDF2 are trademarks of their respective owners; compatibility is provided for porting convenience.
+© Clark Labs Inc. • [www.clarkchat.com](https://www.clarkchat.com)
+>
+>`pdfer_forms` is not affiliated with the authors of pypdf or PyPDF2. pypdf and PyPDF2 are trademarks of their respective owners; compatibility is provided for porting convenience.
