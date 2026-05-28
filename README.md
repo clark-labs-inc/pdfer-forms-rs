@@ -32,7 +32,7 @@ If you are porting a Python PDF workflow to Rust, or building a Rust service tha
 
 ```toml
 [dependencies]
-pdfer_forms = "0.2.2"
+pdfer_forms = "0.2.3"
 ```
 
 Requires Rust **1.88+**.
