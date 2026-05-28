@@ -1,6 +1,7 @@
 /target
 /benchmarks/target
 /benchmarks/.venv
+.DS_Store
 **/*.rs.bk
 __pycache__/
 *.pyc

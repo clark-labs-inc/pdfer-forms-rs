@@ -1,9 +1,9 @@
 [package]
 name = "pdfer_forms"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
-authors = ["Clark Labs Inc."]
+authors = ["Stanislav Kirdey, Clark Labs Inc."]
 license = "MIT OR Apache-2.0"
 description = "Fast pure-Rust PDF form filling, AcroForm inspection, and document operations (merge, split, rotate, encrypt) — a pypdf / PyPDF2 compatibility layer."
 keywords = ["pdf", "acroform", "forms", "merge", "encrypt"]

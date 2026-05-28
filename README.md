@@ -7,7 +7,7 @@
 
 **`pdfer_forms`** is a fast, pure-Rust library for **filling PDF forms**, **inspecting AcroForm fields**, **flattening fillable PDFs**, and **document operations** (merge, split, rotate, encrypt/decrypt) — with an API modeled on Python's [`pypdf`](https://pypdf.readthedocs.io/) and `PyPDF2`.
 
-Built and maintained by **[Clark Labs Inc.](https://github.com/clark-labs-inc)**
+Built and maintained by **Stanislav Kirdey, [Clark Labs Inc.](https://github.com/clark-labs-inc)**
 
 - **Pure Rust**, no Python, no C dependencies (built on [`lopdf`](https://crates.io/crates/lopdf))
 - **Fast** — up to **23× faster than pypdf** on real-world government forms (see benchmarks below)
@@ -269,6 +269,10 @@ All 6 core pypdf form APIs pass on every test PDF. PyPDF2-style camelCase aliase
 
 Issues and pull requests are welcome at <https://github.com/clark-labs-inc/pdfer-forms-rs>.
 
+## Citation
+
+Citation authorship: Stanislav Kirdey, Clark Labs Inc. See [`CITATION.cff`](CITATION.cff) for machine-readable citation metadata.
+
 ## License
 
 Licensed under either of
@@ -280,6 +284,6 @@ at your option.
 
 ---
 
-© Clark Labs Inc. • [www.clarkchat.com](https://www.clarkchat.com)
+© Stanislav Kirdey, Clark Labs Inc. • [www.clarkchat.com](https://www.clarkchat.com)
 >
 >`pdfer_forms` is not affiliated with the authors of pypdf or PyPDF2. pypdf and PyPDF2 are trademarks of their respective owners; compatibility is provided for porting convenience.
