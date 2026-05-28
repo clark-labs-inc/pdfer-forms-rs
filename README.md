@@ -32,10 +32,10 @@ If you are porting a Python PDF workflow to Rust, or building a Rust service tha
 
 ```toml
 [dependencies]
-pdfer_forms = "0.2"
+pdfer_forms = "0.2.2"
 ```
 
-Requires Rust **1.85+** (set by the pinned `lopdf = 0.40` dependency).
+Requires Rust **1.88+**.
 
 ## Quick start — fill a PDF form in Rust
 
