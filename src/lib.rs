@@ -13,6 +13,31 @@ pub mod ops;
 
 pub type Result<T> = std::result::Result<T, PdferError>;
 
+/// Outcome of a form-field update, so callers can tell which requested fields
+/// were actually applied instead of assuming success.
+///
+/// A field counts as `matched` when at least one widget annotation in the
+/// selected pages matched the requested name (by fully-qualified name or partial
+/// `/T`). Requested names that matched no widget are reported in `unmatched` —
+/// the signal an integration should surface as an error rather than reporting a
+/// silent no-op as success.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FillReport {
+    /// Requested field names that matched at least one widget and were updated.
+    pub matched: Vec<String>,
+    /// Requested field names that matched no widget (nothing was written).
+    pub unmatched: Vec<String>,
+    /// Total widget annotations updated (a single field may span several pages).
+    pub widgets_updated: usize,
+}
+
+impl FillReport {
+    /// True when every requested field matched at least one widget.
+    pub fn all_matched(&self) -> bool {
+        self.unmatched.is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub enum PdferError {
     Lopdf(LopdfError),
@@ -542,10 +567,12 @@ impl PdfWriterCompat {
         flags: u32,
         auto_regenerate: Option<bool>,
         flatten: bool,
-    ) -> Result<()> {
+    ) -> Result<FillReport> {
         if !has_acroform(&self.document)? {
             return Err(PdferError::MissingAcroForm);
         }
+        let mut matched: BTreeSet<String> = BTreeSet::new();
+        let mut widgets_updated: usize = 0;
         let catalog_id = catalog_id(&self.document)?;
         let acro_id = ensure_indirect_dictionary_entry(&mut self.document, catalog_id, "AcroForm")?;
         if read_array_entry_clone(&self.document, acro_id, "Fields")?.is_none() {
@@ -581,7 +608,23 @@ impl PdfWriterCompat {
                     annotation_dict.clone()
                 };
 
-                let qualified_name = if let Some(parent_id) = parent_id {
+                // The qualified name must identify the field that holds `/V`,
+                // which is `parent_annotation`. For a *merged* field+widget (the
+                // annotation itself carries `/FT` and `/T`, as in most IRS /
+                // USCIS / DMV forms) that field IS this annotation, so its name
+                // must include the annotation's own `/T`. Computing it from
+                // `parent_id` here dropped the leaf segment, so a fully-qualified
+                // name from `get_fields()` (which includes the leaf) never
+                // matched — fills silently no-op'd. Use `annotation_id` in the
+                // merged case so the names round-trip.
+                let is_merged_field_widget =
+                    annotation_dict.get(b"FT").is_ok() && annotation_dict.get(b"T").is_ok();
+                let qualified_name = if is_merged_field_widget {
+                    match annotation_id {
+                        Some(id) => qualified_name_from_id(&self.document, id)?,
+                        None => qualified_name_from_dict(&self.document, &parent_annotation),
+                    }
+                } else if let Some(parent_id) = parent_id {
                     qualified_name_from_id(&self.document, parent_id)?
                 } else if let Some(annotation_id) = annotation_id {
                     qualified_name_from_id(&self.document, annotation_id)?
@@ -599,6 +642,8 @@ impl PdfWriterCompat {
                     if qualified_name != *field_name && partial_name.as_deref() != Some(field_name.as_str()) {
                         continue;
                     }
+                    matched.insert(field_name.clone());
+                    widgets_updated += 1;
 
                     if inherited_name(&self.document, &parent_annotation, "FT").as_deref() == Some("Ch")
                         && parent_annotation.get(b"I").is_ok()
@@ -679,7 +724,16 @@ impl PdfWriterCompat {
             }
         }
 
-        Ok(())
+        let unmatched = fields
+            .keys()
+            .filter(|name| !matched.contains(*name))
+            .cloned()
+            .collect();
+        Ok(FillReport {
+            matched: matched.into_iter().collect(),
+            unmatched,
+            widgets_updated,
+        })
     }
 
     pub fn reattach_fields(&mut self, page: Option<PageSelection>) -> Result<Vec<FormField>> {
@@ -827,6 +881,7 @@ impl PdfWriterCompat {
             .map(|(name, value)| (name.clone(), FieldInput::Text(value.clone())))
             .collect::<BTreeMap<_, _>>();
         self.update_page_form_field_values(page, &converted, flags, Some(true), false)
+            .map(|_| ())
     }
 
     #[allow(non_snake_case)]
@@ -1852,5 +1907,173 @@ mod tests {
         let input = FieldInput::KeepCurrent;
         let resolved = input.materialize(Some("existing"));
         assert_eq!(resolved, FieldInput::Text("existing".to_owned()));
+    }
+
+    /// Builds a nested AcroForm whose leaf is a *merged* field+widget (carries
+    /// `/FT` and `/T` and is the page annotation), exactly the shape used by IRS
+    /// / USCIS / DMV forms. Regression for the bug where filling by the
+    /// fully-qualified name (`topmostSubform[0].Page1[0].f1_07[0]`) — the name
+    /// `get_fields()` returns — silently matched nothing because the qualified
+    /// name was computed from the widget's `/Parent` (dropping the leaf `/T`).
+    #[test]
+    fn fills_merged_widget_by_fully_qualified_name() {
+        fn set(dict: &mut Dictionary, k: &str, v: Object) {
+            dict.set(k, v);
+        }
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let top_id = doc.new_object_id();
+        let p_id = doc.new_object_id();
+        let widget_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+
+        let mut top = Dictionary::new();
+        set(&mut top, "T", Object::string_literal("topmostSubform[0]"));
+        set(&mut top, "Kids", Object::Array(vec![Object::Reference(p_id)]));
+        doc.objects.insert(top_id, Object::Dictionary(top));
+
+        let mut parent = Dictionary::new();
+        set(&mut parent, "T", Object::string_literal("Page1[0]"));
+        set(&mut parent, "Parent", Object::Reference(top_id));
+        set(&mut parent, "Kids", Object::Array(vec![Object::Reference(widget_id)]));
+        doc.objects.insert(p_id, Object::Dictionary(parent));
+
+        let mut widget = Dictionary::new();
+        set(&mut widget, "Type", Object::Name(b"Annot".to_vec()));
+        set(&mut widget, "Subtype", Object::Name(b"Widget".to_vec()));
+        set(&mut widget, "FT", Object::Name(b"Tx".to_vec()));
+        set(&mut widget, "T", Object::string_literal("f1_07[0]"));
+        set(&mut widget, "Parent", Object::Reference(p_id));
+        set(
+            &mut widget,
+            "Rect",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(150),
+                Object::Integer(20),
+            ]),
+        );
+        doc.objects.insert(widget_id, Object::Dictionary(widget));
+
+        let mut page = Dictionary::new();
+        set(&mut page, "Type", Object::Name(b"Page".to_vec()));
+        set(&mut page, "Parent", Object::Reference(pages_id));
+        set(
+            &mut page,
+            "MediaBox",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        );
+        set(&mut page, "Annots", Object::Array(vec![Object::Reference(widget_id)]));
+        doc.objects.insert(page_id, Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        set(&mut pages, "Type", Object::Name(b"Pages".to_vec()));
+        set(&mut pages, "Kids", Object::Array(vec![Object::Reference(page_id)]));
+        set(&mut pages, "Count", Object::Integer(1));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+
+        let mut acro = Dictionary::new();
+        set(&mut acro, "Fields", Object::Array(vec![Object::Reference(top_id)]));
+        set(&mut acro, "DA", Object::string_literal("/Helv 10 Tf 0 g"));
+        let acro_id = doc.add_object(Object::Dictionary(acro));
+
+        let mut catalog = Dictionary::new();
+        set(&mut catalog, "Type", Object::Name(b"Catalog".to_vec()));
+        set(&mut catalog, "Pages", Object::Reference(pages_id));
+        set(&mut catalog, "AcroForm", Object::Reference(acro_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        // The name get_fields() exposes for this leaf.
+        let fq = "topmostSubform[0].Page1[0].f1_07[0]".to_owned();
+        let reader = PdfReaderCompat::from_document(doc);
+        let fields = reader.get_fields().unwrap().unwrap();
+        assert!(fields.contains_key(&fq), "get_fields keys: {:?}", fields.keys().collect::<Vec<_>>());
+
+        let mut writer = PdfWriterCompat::from_document(reader.into_inner());
+        let mut updates = BTreeMap::new();
+        updates.insert(fq.clone(), FieldInput::Text("Maria Garcia".to_owned()));
+        let report = writer
+            .update_page_form_field_values(PageSelection::All, &updates, 0, Some(true), false)
+            .unwrap();
+
+        assert_eq!(report.unmatched, Vec::<String>::new(), "fully-qualified name must match");
+        assert_eq!(report.matched, vec![fq]);
+        assert_eq!(report.widgets_updated, 1);
+    }
+
+    /// A requested name that matches no widget must be reported as `unmatched`
+    /// (so integrations can fail loudly instead of treating a no-op as success).
+    #[test]
+    fn unmatched_field_is_reported_not_silently_dropped() {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let widget_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+
+        let mut widget = Dictionary::new();
+        widget.set("Type", Object::Name(b"Annot".to_vec()));
+        widget.set("Subtype", Object::Name(b"Widget".to_vec()));
+        widget.set("FT", Object::Name(b"Tx".to_vec()));
+        widget.set("T", Object::string_literal("real_field"));
+        widget.set(
+            "Rect",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(100),
+                Object::Integer(20),
+            ]),
+        );
+        doc.objects.insert(widget_id, Object::Dictionary(widget));
+
+        let mut page = Dictionary::new();
+        page.set("Type", Object::Name(b"Page".to_vec()));
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        );
+        page.set("Annots", Object::Array(vec![Object::Reference(widget_id)]));
+        doc.objects.insert(page_id, Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        pages.set("Type", Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Object::Array(vec![Object::Reference(page_id)]));
+        pages.set("Count", Object::Integer(1));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+
+        let mut acro = Dictionary::new();
+        acro.set("Fields", Object::Array(vec![Object::Reference(widget_id)]));
+        let acro_id = doc.add_object(Object::Dictionary(acro));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", Object::Reference(pages_id));
+        catalog.set("AcroForm", Object::Reference(acro_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let mut writer = PdfWriterCompat::from_document(doc);
+        let mut updates = BTreeMap::new();
+        updates.insert("real_field".to_owned(), FieldInput::Text("ok".to_owned()));
+        updates.insert("ghost_field".to_owned(), FieldInput::Text("nope".to_owned()));
+        let report = writer
+            .update_page_form_field_values(PageSelection::All, &updates, 0, Some(true), false)
+            .unwrap();
+
+        assert_eq!(report.matched, vec!["real_field".to_owned()]);
+        assert_eq!(report.unmatched, vec!["ghost_field".to_owned()]);
+        assert!(!report.all_matched());
     }
 }
