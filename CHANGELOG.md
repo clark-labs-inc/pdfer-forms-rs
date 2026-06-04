@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+### Added
+- `update_page_form_field_values` now also matches a requested field by its leaf
+  `/T` (the final `.`-segment) when the fully-qualified name and partial name
+  don't match. Callers (LLM agents) reliably copy the leaf field name but often
+  drop/mangle intermediate AcroForm group segments (e.g. request
+  `…Page1[0].f1_07[0]` for a field actually at `…Page1[0].Address_ReadOrder[0].f1_07[0]`);
+  the leaf `/T` identifies the widget, so these now resolve instead of silently
+  not matching.
+
+
 ## 0.3.0
 
 ### Fixed

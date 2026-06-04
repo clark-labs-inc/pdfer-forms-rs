@@ -639,7 +639,21 @@ impl PdfWriterCompat {
                 let rect = extract_rect(&annotation_dict)?;
 
                 for (field_name, input) in fields {
-                    if qualified_name != *field_name && partial_name.as_deref() != Some(field_name.as_str()) {
+                    // Match on the fully-qualified name, the partial `/T`, or —
+                    // as a fallback — the requested name's final `.`-segment
+                    // against this widget's `/T`. Callers (LLM agents) reliably
+                    // copy the leaf field name but frequently drop or mangle the
+                    // intermediate AcroForm group segments (e.g. request
+                    // `topmostSubform[0].Page1[0].f1_07[0]` when the real field is
+                    // `topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_07[0]`).
+                    // The leaf `/T` identifies the widget; the group path is just
+                    // navigation, so a leaf match resolves these without forcing
+                    // byte-exact qualified names.
+                    let requested_leaf = field_name.rsplit('.').next().unwrap_or(field_name.as_str());
+                    let matches = qualified_name == *field_name
+                        || partial_name.as_deref() == Some(field_name.as_str())
+                        || partial_name.as_deref() == Some(requested_leaf);
+                    if !matches {
                         continue;
                     }
                     matched.insert(field_name.clone());
@@ -2006,6 +2020,75 @@ mod tests {
         assert_eq!(report.unmatched, Vec::<String>::new(), "fully-qualified name must match");
         assert_eq!(report.matched, vec![fq]);
         assert_eq!(report.widgets_updated, 1);
+    }
+
+    /// A caller that drops/mangles the intermediate AcroForm group segments but
+    /// keeps the correct leaf field name (a very common LLM behavior) should
+    /// still fill the widget, via the leaf-`/T` fallback match.
+    #[test]
+    fn fills_by_leaf_when_group_path_is_mangled() {
+        let mut doc = Document::with_version("1.7");
+        let pages_id = doc.new_object_id();
+        let widget_id = doc.new_object_id();
+        let page_id = doc.new_object_id();
+
+        let mut widget = Dictionary::new();
+        widget.set("Type", Object::Name(b"Annot".to_vec()));
+        widget.set("Subtype", Object::Name(b"Widget".to_vec()));
+        widget.set("FT", Object::Name(b"Tx".to_vec()));
+        widget.set("T", Object::string_literal("f1_07[0]"));
+        widget.set(
+            "Rect",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(150),
+                Object::Integer(20),
+            ]),
+        );
+        doc.objects.insert(widget_id, Object::Dictionary(widget));
+
+        let mut page = Dictionary::new();
+        page.set("Type", Object::Name(b"Page".to_vec()));
+        page.set("Parent", Object::Reference(pages_id));
+        page.set(
+            "MediaBox",
+            Object::Array(vec![
+                Object::Integer(0),
+                Object::Integer(0),
+                Object::Integer(612),
+                Object::Integer(792),
+            ]),
+        );
+        page.set("Annots", Object::Array(vec![Object::Reference(widget_id)]));
+        doc.objects.insert(page_id, Object::Dictionary(page));
+
+        let mut pages = Dictionary::new();
+        pages.set("Type", Object::Name(b"Pages".to_vec()));
+        pages.set("Kids", Object::Array(vec![Object::Reference(page_id)]));
+        pages.set("Count", Object::Integer(1));
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+
+        let mut acro = Dictionary::new();
+        acro.set("Fields", Object::Array(vec![Object::Reference(widget_id)]));
+        let acro_id = doc.add_object(Object::Dictionary(acro));
+        let mut catalog = Dictionary::new();
+        catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", Object::Reference(pages_id));
+        catalog.set("AcroForm", Object::Reference(acro_id));
+        let catalog_id = doc.add_object(Object::Dictionary(catalog));
+        doc.trailer.set("Root", Object::Reference(catalog_id));
+
+        let mut writer = PdfWriterCompat::from_document(doc);
+        let mut updates = BTreeMap::new();
+        // Real field is just `f1_07[0]`, but the caller invented a group path.
+        let mangled = "topmostSubform[0].Page1[0].Address_ReadOrder[0].f1_07[0]".to_owned();
+        updates.insert(mangled.clone(), FieldInput::Text("Mary Smith".to_owned()));
+        let report = writer
+            .update_page_form_field_values(PageSelection::All, &updates, 0, Some(true), false)
+            .unwrap();
+        assert_eq!(report.matched, vec![mangled], "leaf `/T` should match a mangled group path");
+        assert!(report.unmatched.is_empty());
     }
 
     /// A requested name that matches no widget must be reported as `unmatched`
