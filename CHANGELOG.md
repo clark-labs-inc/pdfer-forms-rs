@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+### Fixed
+- Checkbox and radio-button updates now resolve common boolean-like inputs such
+  as `on`, `checked`, and `true` to the widget's real non-Off appearance state
+  instead of silently writing `/Off`.
+
+### Added
+- Public `resolve_button_state` API for callers that need the same exact-state
+  and boolean-alias resolution used by the form writer.
+
 ## 0.3.1
 
 ### Added

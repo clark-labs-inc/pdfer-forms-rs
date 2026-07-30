@@ -296,6 +296,45 @@ impl FormField {
     }
 }
 
+/// Resolve a requested button value to an exact PDF appearance state.
+///
+/// Exact states take precedence. Common boolean-like values are accepted for
+/// callers that know a checkbox should be selected but do not know whether the
+/// document calls its on-state `/Yes`, `/On`, `/1`, or something else.
+pub fn resolve_button_state<S: AsRef<str>>(states: &[S], requested: &str) -> Option<String> {
+    let normalized_requested = normalize_name(requested);
+    let requested = normalized_requested.trim();
+    let requested_lower = requested.to_ascii_lowercase();
+
+    if let Some(state) = states
+        .iter()
+        .map(AsRef::as_ref)
+        .find(|state| normalize_name(state).eq_ignore_ascii_case(requested))
+    {
+        return Some(slash_name(state));
+    }
+
+    if matches!(
+        requested_lower.as_str(),
+        "" | "off" | "false" | "unchecked" | "no" | "0"
+    ) {
+        return Some("/Off".to_owned());
+    }
+
+    if matches!(
+        requested_lower.as_str(),
+        "on" | "true" | "checked" | "yes" | "1"
+    ) {
+        return states
+            .iter()
+            .map(AsRef::as_ref)
+            .find(|state| !normalize_name(state).eq_ignore_ascii_case("Off"))
+            .map(slash_name);
+    }
+
+    None
+}
+
 pub mod field_flags {
     pub const READ_ONLY: u32 = 1 << 0;
     pub const REQUIRED: u32 = 1 << 1;
@@ -1341,26 +1380,8 @@ fn add_core_font_object(document: &mut Document, font_name: &str) -> ObjectId {
 }
 
 fn choose_button_state(document: &Document, annotation_dict: &Dictionary, requested: &str) -> String {
-    let requested = if requested.is_empty() {
-        "/Off".to_owned()
-    } else {
-        slash_name(requested)
-    };
-
-    if let Ok(ap_obj) = annotation_dict.get(b"AP") {
-        if let Ok(ap_dict) = deref_dictionary_clone(document, ap_obj) {
-            if let Ok(normal_obj) = ap_dict.get(b"N") {
-                if let Ok(normal_dict) = deref_dictionary_clone(document, normal_obj) {
-                    let normalized = normalize_name(&requested);
-                    if normal_dict.get(normalized.as_bytes()).is_ok() {
-                        return requested;
-                    }
-                }
-            }
-        }
-    }
-
-    "/Off".to_owned()
+    let states = extract_button_states_from_dict(document, annotation_dict).unwrap_or_default();
+    resolve_button_state(&states, requested).unwrap_or_else(|| "/Off".to_owned())
 }
 
 fn resolve_button_appearance_stream(
@@ -1889,6 +1910,51 @@ mod tests {
         assert_eq!(normalize_name("/Yes"), "Yes");
         assert_eq!(slash_name("Yes"), "/Yes");
         assert_eq!(slash_name("/Yes"), "/Yes");
+    }
+
+    #[test]
+    fn button_state_resolution_prefers_exact_states_and_supports_boolean_aliases() {
+        let states = vec!["/Off".to_owned(), "/Selected".to_owned()];
+
+        assert_eq!(
+            resolve_button_state(&states, "/selected"),
+            Some("/Selected".to_owned())
+        );
+        assert_eq!(
+            resolve_button_state(&states, "on"),
+            Some("/Selected".to_owned())
+        );
+        assert_eq!(
+            resolve_button_state(&states, "true"),
+            Some("/Selected".to_owned())
+        );
+        assert_eq!(
+            resolve_button_state(&states, "unchecked"),
+            Some("/Off".to_owned())
+        );
+        assert_eq!(resolve_button_state(&states, "unknown"), None);
+
+        let radio_states = vec!["/No".to_owned(), "/Off".to_owned(), "/Yes".to_owned()];
+        assert_eq!(
+            resolve_button_state(&radio_states, "no"),
+            Some("/No".to_owned())
+        );
+    }
+
+    #[test]
+    fn choose_button_state_maps_on_to_the_widgets_non_off_appearance() {
+        let mut normal = Dictionary::new();
+        normal.set("Yes", Object::Null);
+        let mut appearance = Dictionary::new();
+        appearance.set("N", Object::Dictionary(normal));
+        let mut widget = Dictionary::new();
+        widget.set("FT", Object::Name(b"Btn".to_vec()));
+        widget.set("AP", Object::Dictionary(appearance));
+
+        assert_eq!(
+            choose_button_state(&Document::with_version("1.7"), &widget, "on"),
+            "/Yes"
+        );
     }
 
     #[test]
