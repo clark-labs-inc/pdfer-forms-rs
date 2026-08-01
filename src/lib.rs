@@ -721,17 +721,21 @@ impl PdfWriterCompat {
                         });
                     let effective_input = input.materialize(current_value_text.as_deref());
 
-                    if !input.is_keep_current() {
+                    if !input.is_keep_current() && field_type != "Btn" {
                         apply_field_value(&mut parent_annotation, &mut annotation_dict, &field_type, &effective_input)?;
                     }
 
                     let mut appearance_stream_id = None;
                     if field_type == "Btn" {
-                        let state_name = choose_button_state(&self.document, &annotation_dict, effective_input.primary_text());
+                        let states = field_states(&self.document, &parent_annotation);
+                        let canonical_state = resolve_button_state(&states, effective_input.primary_text())
+                            .unwrap_or_else(|| slash_name(effective_input.primary_text()));
+                        let state_name = choose_button_state(&self.document, &annotation_dict, &canonical_state);
                         let pdf_name = normalize_name(&state_name);
                         annotation_dict.set("AS", Object::Name(pdf_name.as_bytes().to_vec()));
                         annotation_dict.set("V", Object::Name(pdf_name.as_bytes().to_vec()));
-                        parent_annotation.set("V", Object::Name(pdf_name.as_bytes().to_vec()));
+                        let canonical_name = normalize_name(&canonical_state);
+                        parent_annotation.set("V", Object::Name(canonical_name.as_bytes().to_vec()));
                         appearance_stream_id = resolve_button_appearance_stream(&mut self.document, &annotation_dict, &state_name)?;
                     } else if field_type == "Tx" || field_type == "Ch" {
                         if let Some(annotation_id) = annotation_id {
@@ -748,8 +752,10 @@ impl PdfWriterCompat {
                         }
                     }
 
-                    if let Some(parent_id) = parent_id {
-                        write_dict_object(&mut self.document, parent_id, parent_annotation.clone())?;
+                    if !is_merged_field_widget {
+                        if let Some(parent_id) = parent_id {
+                            write_dict_object(&mut self.document, parent_id, parent_annotation.clone())?;
+                        }
                     }
                     if let Some(annotation_id) = annotation_id {
                         write_dict_object(&mut self.document, annotation_id, annotation_dict.clone())?;
@@ -757,11 +763,13 @@ impl PdfWriterCompat {
 
                     if flatten {
                         if let Some(ap_id) = appearance_stream_id {
+                            let placement_id = annotation_id.unwrap_or(ap_id);
                             let object_name = format!(
-                                "Fm_{}_{}_{}",
-                                field_name.replace('.', "_"),
+                                "Fm_{}_{}_{}_{}",
                                 page_id.0,
-                                page_id.1
+                                page_id.1,
+                                placement_id.0,
+                                placement_id.1
                             );
                             flatten_appearance_stream(
                                 &mut self.document,
@@ -801,9 +809,7 @@ impl PdfWriterCompat {
 
         let mut existing = BTreeSet::new();
         for item in &fields {
-            if let Some(id) = object_reference(item) {
-                existing.insert(id);
-            }
+            collect_field_tree_ids(&self.document, item, &mut existing)?;
         }
 
         let mut reattached = Vec::new();
@@ -976,9 +982,9 @@ fn collect_fields(
     }
 
     if let Ok(kids_obj) = field_dict.get(b"Kids") {
-        if let Object::Array(kids) = kids_obj {
+        if let Ok(kids) = deref_array_clone(document, kids_obj) {
             for kid in kids {
-                collect_fields(document, kid, out, visited)?;
+                collect_fields(document, &kid, out, visited)?;
             }
         }
     }
@@ -1001,15 +1007,8 @@ fn build_form_field(document: &Document, field_id: Option<ObjectId>, dict: &Dict
     let kids = dict
         .get(b"Kids")
         .ok()
-        .and_then(|obj| match obj {
-            Object::Array(values) => Some(
-                values
-                    .iter()
-                    .filter_map(object_reference)
-                    .collect::<Vec<ObjectId>>(),
-            ),
-            _ => None,
-        })
+        .and_then(|obj| deref_array_clone(document, obj).ok())
+        .map(|values| values.iter().filter_map(object_reference).collect())
         .unwrap_or_default();
 
     Ok(FormField {
@@ -1086,22 +1085,22 @@ fn extract_button_states_from_dict(document: &Document, dict: &Dictionary) -> Op
     }
 
     let flags = inherited_integer(document, dict, "Ff").unwrap_or_default() as u32;
-    if flags & field_flags::RADIO != 0 {
-        if let Ok(kids_obj) = dict.get(b"Kids") {
-            if let Object::Array(kids) = kids_obj {
-                let mut states = Vec::new();
-                for kid in kids {
-                    if let Ok(kid_dict) = deref_dictionary_clone(document, kid) {
-                        if let Some(mut child_states) = extract_button_states_from_dict(document, &kid_dict) {
-                            states.append(&mut child_states);
-                        }
+    if let Ok(kids_obj) = dict.get(b"Kids") {
+        if let Ok(kids) = deref_array_clone(document, kids_obj) {
+            let mut states = Vec::new();
+            for kid in &kids {
+                if let Ok(kid_dict) = deref_dictionary_clone(document, kid) {
+                    if let Some(mut child_states) = extract_button_states_from_dict(document, &kid_dict) {
+                        states.append(&mut child_states);
                     }
                 }
-                states.sort();
-                states.dedup();
-                if flags & field_flags::NO_TOGGLE_TO_OFF != 0 {
-                    states.retain(|state| state != "/Off");
-                }
+            }
+            states.sort();
+            states.dedup();
+            if flags & field_flags::NO_TOGGLE_TO_OFF != 0 {
+                states.retain(|state| state != "/Off");
+            }
+            if !states.is_empty() {
                 return Some(states);
             }
         }
@@ -1154,8 +1153,8 @@ fn get_pages_showing_field_impl(document: &Document, field: FieldSpecifier) -> R
             }
         }
     } else if let Ok(kids_obj) = field_dict.get(b"Kids") {
-        if let Object::Array(kids) = kids_obj {
-            for kid in kids {
+        if let Ok(kids) = deref_array_clone(document, kids_obj) {
+            for kid in &kids {
                 let kid_dict = deref_dictionary_clone(document, kid)?;
                 if object_name_from_dict(&kid_dict, "Subtype").as_deref() == Some("Widget")
                     && kid_dict.get(b"T").is_err()
@@ -1675,6 +1674,36 @@ fn deref_dictionary_clone(document: &Document, object: &Object) -> Result<Dictio
         Object::Reference(id) => Ok(document.get_dictionary(*id)?.clone()),
         _ => Err(PdferError::InvalidStructure("object is not a dictionary")),
     }
+}
+
+fn deref_array_clone(document: &Document, object: &Object) -> Result<Vec<Object>> {
+    match object {
+        Object::Array(values) => Ok(values.clone()),
+        Object::Reference(id) => match document.get_object(*id)? {
+            Object::Array(values) => Ok(values.clone()),
+            _ => Err(PdferError::InvalidStructure("object did not resolve to an array")),
+        },
+        _ => Err(PdferError::InvalidStructure("object is not an array")),
+    }
+}
+
+fn collect_field_tree_ids(
+    document: &Document,
+    field: &Object,
+    existing: &mut BTreeSet<ObjectId>,
+) -> Result<()> {
+    if let Some(id) = object_reference(field) {
+        if !existing.insert(id) {
+            return Ok(());
+        }
+    }
+    let dictionary = deref_dictionary_clone(document, field)?;
+    if let Ok(kids) = dictionary.get(b"Kids") {
+        for kid in deref_array_clone(document, kids)? {
+            collect_field_tree_ids(document, &kid, existing)?;
+        }
+    }
+    Ok(())
 }
 
 fn write_dict_object(document: &mut Document, object_id: ObjectId, dict: Dictionary) -> Result<()> {

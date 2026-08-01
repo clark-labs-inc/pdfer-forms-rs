@@ -1,6 +1,6 @@
 [package]
 name = "pdfer_forms"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Stanislav Kirdey, Clark Labs Inc."]

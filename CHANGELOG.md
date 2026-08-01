@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4
+
+### Fixed
+- Filling a merged field/widget no longer overwrites its non-terminal parent
+  and creates a self-referential form tree.
+- Radio groups retain their canonical parent value regardless of widget order,
+  while each widget selects its own matching appearance state.
+- Flattening multiple widgets on one page uses distinct XObject resource names.
+- Checkbox/radio states and page lookup now follow direct or indirect `/Kids`
+  arrays, and field reattachment no longer duplicates canonical descendants.
+
 ## 0.3.3
 
 ### Fixed
