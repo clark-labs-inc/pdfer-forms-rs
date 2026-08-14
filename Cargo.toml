@@ -15,7 +15,7 @@ readme = "README.md"
 exclude = ["benchmarks/target/", "benchmarks/pdfs/"]
 
 [dependencies]
-lopdf = "0.40"
+lopdf = "0.42"
 
 [package.metadata.docs.rs]
 all-features = true
